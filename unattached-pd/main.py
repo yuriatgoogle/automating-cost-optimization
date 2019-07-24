@@ -13,8 +13,6 @@
 
 # modify these variables for your environment:
 project = 'automating-cost-optimization'
-authorizedUsername = "postman"
-authorizedPassword = "postman"
 
 # imports
 import datetime
@@ -35,6 +33,8 @@ import pytz
 # initialize global
 compute = googleapiclient.discovery.build('compute', 'v1')
 credentials = GoogleCredentials.get_application_default()
+# constant - the unused disk must be at least this many days old to be deleted
+deleteAge = 0
 
 # define helper functions
 def waitForZoneOperation(operationResponse, project, zone):
@@ -45,6 +45,11 @@ def waitForZoneOperation(operationResponse, project, zone):
         checkResponse = checkRequest.execute()
         status = checkResponse["status"]
         time.sleep(3)
+
+def diskAge(inputTimestamp):
+    detachTimestamp = dateutil.parser.parse(inputTimestamp)
+    age = pytz.utc.localize(datetime.utcnow()) - detachTimestamp
+    return (age.days)
 
 # main function
 def delete_unattached_pds(request):
@@ -63,51 +68,48 @@ def delete_unattached_pds(request):
                    
                     # handle never attached disk - delete it
                     # lastAttachedTimestamp is not present
-                    try:
-                        if disk['lastAttachTimestamp'] is None:
-                            print ("none!")
-                    except KeyError:
+                    if disk.get("lastAttachTimestamp") is None:
                         print ("disk " + diskName + " was never attached - deleting")
-                        deleteRequest = compute.disks().delete(project=project, zone=diskZone, disk=diskName)
+                        deleteRequest = compute.disks().delete(project=project, 
+                            zone=diskZone, 
+                            disk=diskName)
                         deleteResponse = deleteRequest.execute()
                         waitForZoneOperation(deleteResponse, project, diskZone)
                         print ("disk " + diskName + " was deleted")
                         continue
 
                     # handle detached disk - snapshot and delete
-                    # lastAttachTimestamp is present AND users is not present
-
-                    try:
-                        if disk['users'] is None and disk['lastDetachTimestamp'] is not None:
-                            print ("users is none")
-                    except KeyError:
+                    # lastAttachTimestamp is present AND users is not present AND it meets the age criterium
+                    if disk.get("users") is None \
+                        and disk.get("lastDetachTimestamp") is not None \
+                        and diskAge(disk['lastDetachTimestamp'])>=deleteAge: 
+                        
                         print ("disk " + diskName + " has no users and has been detached")
-                        detachTimestamp = dateutil.parser.parse(disk['lastDetachTimestamp'])
-                        detachedFor = pytz.utc.localize(datetime.utcnow()) - detachTimestamp
+                        print ("disk meets age criteria for deletion")
                         
-                        print ("disk has been detached for " + str(detachedFor))
-                        
-                        # update this for your preferred age
-                        if detachedFor.days > -1:
-                            # take a snapshot
-                            snapShotName = diskName + str(int(time.time()))
-                            print ("taking snapshot: " + snapShotName)
-                            snapshotBody = {
-                                "name": snapShotName
-                            }
-                            snapshotRequest = compute.disks().createSnapshot(project=project, zone=diskZone, disk=diskName, body=snapshotBody)
-                            snapshotResponse = snapshotRequest.execute()
-                            waitForZoneOperation(snapshotResponse, project, diskZone)
-                            print ("snapshot completed")
+                        # take a snapshot
+                        snapShotName = diskName + str(int(time.time()))
+                        print ("taking snapshot: " + snapShotName)
+                        snapshotBody = {
+                            "name": snapShotName
+                        }
+                        snapshotRequest = compute.disks().createSnapshot(project=project, 
+                            zone=diskZone, 
+                            disk=diskName, 
+                            body=snapshotBody)
+                        snapshotResponse = snapshotRequest.execute()
+                        waitForZoneOperation(snapshotResponse, project, diskZone)
+                        print ("snapshot completed")
 
-                            # delete the disk
-                            print ("deleting disk " + diskName)
-                            deleteRequest = compute.disks().delete(project=project, zone=diskZone, disk=diskName)
-                            deleteResponse = deleteRequest.execute()
-                            waitForZoneOperation(deleteResponse, project, diskZone)
-                            print ("disk " + diskName + " was deleted")
-                            continue
-
+                        # delete the disk
+                        print ("deleting disk " + diskName)
+                        deleteRequest = compute.disks().delete(project=project, 
+                            zone=diskZone, 
+                            disk=diskName)
+                        deleteResponse = deleteRequest.execute()
+                        waitForZoneOperation(deleteResponse, project, diskZone)
+                        print ("disk " + diskName + " was deleted")
+                        continue
 
         disksRequest = compute.disks().aggregatedList_next(previous_request=disksRequest, previous_response=diskResponse)
     return ("disk deletion completed")
