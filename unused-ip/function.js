@@ -23,6 +23,10 @@ limitations under the License.
 // Imports the Google Cloud client library
 const Compute = require('@google-cloud/compute');
 
+// set this constant to the minimum age of unused address
+// an unused address will be deleted if it's at least this many days old
+const ageToDelete = 0;
+
 exports.unused_ip_function = (req, res) => {
     
     console.log("function called!");
@@ -47,22 +51,27 @@ exports.unused_ip_function = (req, res) => {
                 
                 // if the address is not used:
                 if (metadata.status=='RESERVED'){
-                   
-                    // compute age by convering ISO 8601 timestamps to Date
-                    var creationDate = new Date(metadata.creationTimestamp);
-                    var currDate = new Date();
-                    var addressAge = Math.floor((currDate - creationDate)/86400e3);;
-                    
-                    // delete address
-                    item.delete(function(err, operation, apiResponse2){
-                        if (err) {
-                            console.log("could not delete address: " + err);
-                        }
-                    })
+                    // if it's at least ageToDelete days old:
+                    if (calculateAge(metadata.creationTimestamp) >= ageToDelete){
+                        // delete address
+                        item.delete(function(err, operation, apiResponse2){
+                            if (err) {
+                                console.log("could not delete address: " + err);
+                            }
+                        })
+                    }
                 }
             })
         }
         // return number of addresses evaluated
         res.send("there are " + addresses.length + " total addresses");
     });  
+}
+
+// helper function to calculate age
+function calculateAge(inputTimestamp) {
+    var creationDate = new Date(inputTimestamp);
+    var currDate = new Date();
+    var age = Math.floor((currDate - creationDate)/86400e3);
+    return age;
 }
