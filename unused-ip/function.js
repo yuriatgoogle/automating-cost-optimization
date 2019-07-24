@@ -49,17 +49,14 @@ exports.unused_ip_function = (req, res) => {
             // get metadata for each address
             item.getMetadata(function(err, metadata, apiResponse) {
                 
-                // if the address is not used:
-                if (metadata.status=='RESERVED'){
-                    // if it's at least ageToDelete days old:
-                    if (calculateAge(metadata.creationTimestamp) >= ageToDelete){
-                        // delete address
-                        item.delete(function(err, operation, apiResponse2){
-                            if (err) {
-                                console.log("could not delete address: " + err);
-                            }
-                        })
-                    }
+                // if the address is not used AND if it's at least ageToDelete days old:
+                if ((metadata.status=='RESERVED') & (calculateAge(metadata.creationTimestamp) >= ageToDelete)){
+                    // delete address
+                    item.delete(function(err, operation, apiResponse2){
+                        if (err) {
+                            console.log("could not delete address: " + err);
+                        }
+                    })
                 }
             })
         }
